@@ -31,7 +31,15 @@ class Job {
     #active_timeouts;
     #active_parent_processes;
 
-    constructor({ runtime, files, args, stdin, timeouts, memory_limits }) {
+    constructor({
+        runtime,
+        files,
+        args,
+        stdin,
+        timeouts,
+        memory_limits,
+        packages,
+    }) {
         this.uuid = uuidv4();
 
         this.logger = logplease.create(`job/${this.uuid}`);
@@ -51,6 +59,8 @@ class Job {
         if (this.stdin.slice(-1) !== '\n') {
             this.stdin += '\n';
         }
+
+        this.packages = packages;
 
         this.#active_timeouts = [];
         this.#active_parent_processes = [];
@@ -141,9 +151,12 @@ class Job {
         this.logger.debug(`Finished exit cleanup`);
     }
 
-    async safe_call(file, args, timeout, memory_limit, eventBus = null) {
+    async safe_call(file, args, timeout, memory_limit, options) {
         return new Promise((resolve, reject) => {
-            const nonetwork = config.disable_networking ? ['nosocket'] : [];
+            const nonetwork =
+                config.disable_networking && !options.elevated_permissions
+                    ? ['nosocket']
+                    : [];
 
             const prlimit = [
                 'prlimit',
@@ -169,26 +182,33 @@ class Job {
             var stderr = '';
             var output = '';
 
+            const proc_info = {};
+            if (!options.elevated_permissions) {
+                proc_info.uid = this.uid;
+                proc_info.gid = this.gid;
+            }
+            if (options.env) {
+                proc_info.env = options.env;
+            }
             const proc = cp.spawn(proc_call[0], proc_call.splice(1), {
                 stdio: 'pipe',
                 cwd: this.dir,
-                uid: this.uid,
-                gid: this.gid,
                 detached: true, //give this process its own process group
+                ...proc_info,
             });
 
             this.#active_parent_processes.push(proc);
 
-            if (eventBus === null) {
+            if (!options.eventBus) {
                 proc.stdin.write(this.stdin);
                 proc.stdin.end();
                 proc.stdin.destroy();
             } else {
-                eventBus.on('stdin', data => {
+                options.eventBus.on('stdin', data => {
                     proc.stdin.write(data);
                 });
 
-                eventBus.on('kill', signal => {
+                options.eventBus.on('kill', signal => {
                     proc.kill(signal);
                 });
             }
@@ -203,8 +223,8 @@ class Job {
             this.#active_timeouts.push(kill_timeout);
 
             proc.stderr.on('data', async data => {
-                if (eventBus !== null) {
-                    eventBus.emit('stderr', data);
+                if (options.eventBus) {
+                    options.eventBus.emit('stderr', data);
                 } else if (stderr.length > this.runtime.output_max_size) {
                     this.logger.info(`stderr length exceeded`);
                     process.kill(proc.pid, 'SIGKILL');
@@ -215,8 +235,8 @@ class Job {
             });
 
             proc.stdout.on('data', async data => {
-                if (eventBus !== null) {
-                    eventBus.emit('stdout', data);
+                if (options.eventBus) {
+                    options.eventBus.emit('stdout', data);
                 } else if (stdout.length > this.runtime.output_max_size) {
                     this.logger.info(`stdout length exceeded`);
                     process.kill(proc.pid, 'SIGKILL');
@@ -241,6 +261,7 @@ class Job {
     }
 
     async execute() {
+        // TODO: group with execute_interactively
         if (this.state !== job_states.PRIMED) {
             throw new Error(
                 'Job must be in primed state, current state: ' +
@@ -249,6 +270,29 @@ class Job {
         }
 
         this.logger.info(`Executing job runtime=${this.runtime.toString()}`);
+
+        let install;
+
+        // TODO: install timeouts, install memory limits, install errored
+        if (this.runtime.package_support && this.packages.length > 0) {
+            install = await this.safe_call(
+                this.runtime.installPackages,
+                this.packages.map(
+                    p => `${this.runtime.flake_path}.packages.${p}`
+                ),
+                -1,
+                -1,
+                {
+                    elevated_permissions: true,
+                }
+            );
+        }
+
+        const env = {};
+        if (install && install.stdout !== '' && install.code === 0) {
+            const install_json = JSON.parse(install.stdout);
+            env.PISTON_PACKAGES_PATH = install_json.map(i => i.outputs.out).join(':');
+        }
 
         const code_files = this.files.filter(file => file.encoding == 'utf8');
 
@@ -262,7 +306,8 @@ class Job {
                 this.runtime.compile,
                 code_files.map(x => x.name),
                 this.timeouts.compile,
-                this.memory_limits.compile
+                this.memory_limits.compile,
+                { env }
             );
             compile_errored = compile.code !== 0;
         }
@@ -275,13 +320,15 @@ class Job {
                 this.runtime.run,
                 [code_files[0].name, ...this.args],
                 this.timeouts.run,
-                this.memory_limits.run
+                this.memory_limits.run,
+                { env }
             );
         }
 
         this.state = job_states.EXECUTED;
 
         return {
+            install,
             compile,
             run,
             language: this.runtime.language,
@@ -311,7 +358,7 @@ class Job {
                 code_files.map(x => x.name),
                 this.timeouts.compile,
                 this.memory_limits.compile,
-                eventBus
+                { eventBus }
             );
 
             eventBus.emit('exit', 'compile', { error, code, signal });
@@ -326,7 +373,7 @@ class Job {
                 [code_files[0].name, ...this.args],
                 this.timeouts.run,
                 this.memory_limits.run,
-                eventBus
+                { eventBus }
             );
 
             eventBus.emit('exit', 'run', { error, code, signal });

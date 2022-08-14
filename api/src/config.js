@@ -72,9 +72,10 @@ const options = {
         parser: parse_int,
         validators: [(x, raw) => !is_nan(x) || `${raw} is not a number`],
     },
+    // TODO: handle max install file size
     max_file_size: {
         desc: 'Max file size in bytes for a file',
-        default: 10000000, //10MB
+        default: 100000000, //10MB
         parser: parse_int,
         validators: [(x, raw) => !is_nan(x) || `${raw} is not a number`],
     },

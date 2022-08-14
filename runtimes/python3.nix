@@ -12,8 +12,10 @@ in piston.mkRuntime {
     ];
 
     run = ''
-    ${pkg}/bin/python3 "$@"
+    PYTHONPATH=$PISTON_PACKAGES_PATH ${pkg}/bin/python3 "$@"
     '';
+
+    packages = pkg.pkgs;
 
     tests = [
         (piston.mkTest {

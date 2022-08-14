@@ -10,7 +10,7 @@ class Runtime {
         runtime,
         run,
         compile,
-        packageSupport,
+        installPackages,
         flake_path,
         timeouts,
         memory_limits,
@@ -34,9 +34,9 @@ class Runtime {
 
         this.run = run;
         this.compile = compile;
+        this.installPackages = installPackages;
 
         this.flake_path = flake_path;
-        this.package_support = packageSupport;
     }
 
     ensure_built() {
@@ -50,6 +50,7 @@ class Runtime {
         }
 
         _ensure_built('run');
+        if (this.package_support) _ensure_built('installPackages');
         if (this.compiled) _ensure_built('compile');
 
         logger.debug(`Finished ensuring ${this} is installed`);
@@ -57,6 +58,10 @@ class Runtime {
 
     get compiled() {
         return this.compile !== null;
+    }
+
+    get package_support() {
+        return this.installPackages !== null;
     }
 
     toString() {
@@ -72,8 +77,7 @@ function compute_single_limit(
     return (
         (config.limit_overrides[language_name] &&
             config.limit_overrides[language_name][limit_name]) ||
-        (language_limit_overrides &&
-            language_limit_overrides[limit_name]) ||
+        (language_limit_overrides && language_limit_overrides[limit_name]) ||
         config[limit_name]
     );
 }
@@ -134,14 +138,11 @@ function get_runtime_from_flakes(runtime_name) {
 
     const this_runtime = new Runtime({
         ...metadata,
-        ...compute_all_limits(
-            metadata.language,
-            metadata.limitOverrides
-        ),
+        ...compute_all_limits(metadata.language, metadata.limitOverrides),
         flake_path,
     });
 
-    return this_runtime
+    return this_runtime;
 }
 
 module.exports.Runtime = Runtime;

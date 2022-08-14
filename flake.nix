@@ -29,7 +29,9 @@
             inherit language version runtime aliases limitOverrides;
             run = runFile;
             compile = compileFile;
-            packageSupport = packages != null;
+            installPackages = if packages != null then pkgs.writeShellScript "install-packages" ''
+            nix build --json "$@"
+            '' else null;
           };
         in {
           inherit packages metadata;
