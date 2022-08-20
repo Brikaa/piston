@@ -70,6 +70,7 @@ const { Job } = require('../job');
                     run: config.run_memory_limit,
                     compile: config.compile_memory_limit,
                 },
+                packages: test.packages || [],
             });
 
             await job.prime();

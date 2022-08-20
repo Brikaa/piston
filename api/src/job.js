@@ -188,7 +188,7 @@ class Job {
                 proc_info.gid = this.gid;
             }
             if (options.env) {
-                proc_info.env = options.env;
+                proc_info.env = { ...process.env, ...options.env };
             }
             const proc = cp.spawn(proc_call[0], proc_call.splice(1), {
                 stdio: 'pipe',
@@ -291,7 +291,9 @@ class Job {
         const env = {};
         if (install && install.stdout !== '' && install.code === 0) {
             const install_json = JSON.parse(install.stdout);
-            env.PISTON_PACKAGES_PATH = install_json.map(i => i.outputs.out).join(':');
+            env.PISTON_PACKAGES_PATH = install_json
+                .map(i => i.outputs.out)
+                .join(':');
         }
 
         const code_files = this.files.filter(file => file.encoding == 'utf8');
