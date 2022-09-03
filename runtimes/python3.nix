@@ -1,9 +1,10 @@
-{pkgs, piston, ...}:
+{pkgs, piston, packages ? [ ], ...}:
 let
-    pkg = pkgs.python3;
+    basePkg = pkgs.python3;
+    pkg = basePkg.withPackages (p: pkgs.lib.lists.forEach packages (x: p.${x}));
 in piston.mkRuntime {
     language = "python3";
-    version = pkg.version;
+    version = basePkg.version;
 
     aliases = [
         "py3"

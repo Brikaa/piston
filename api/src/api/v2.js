@@ -59,6 +59,7 @@ function get_job(job_info, available_runtimes) {
         run_memory_limit,
         run_timeout,
         compile_timeout,
+        packages,
     } = job_info;
 
     return new Promise((resolve, reject) => {
@@ -133,6 +134,8 @@ function get_job(job_info, available_runtimes) {
             }
         }
 
+        // TODO: packages check
+
         compile_timeout = compile_timeout || rt.timeouts.compile;
         run_timeout = run_timeout || rt.timeouts.run;
         compile_memory_limit = compile_memory_limit || rt.memory_limits.compile;
@@ -151,6 +154,7 @@ function get_job(job_info, available_runtimes) {
                     run: run_memory_limit,
                     compile: compile_memory_limit,
                 },
+                packages: packages || [],
             })
         );
     });
@@ -283,6 +287,7 @@ router.post('/execute', async (req, res) => {
 
         return res.status(200).send(result);
     } catch (error) {
+        console.error(error);
         return res.status(400).json(error);
     }
 });

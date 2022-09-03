@@ -4,6 +4,7 @@ const config = require('./config');
 
 class Runtime {
     constructor({
+        name,
         language,
         version,
         aliases,
@@ -21,6 +22,7 @@ class Runtime {
     }) {
         this.language = language;
         this.runtime = runtime;
+        this.name = name;
 
         this.timeouts = timeouts;
         this.memory_limits = memory_limits;
@@ -72,8 +74,7 @@ function compute_single_limit(
     return (
         (config.limit_overrides[language_name] &&
             config.limit_overrides[language_name][limit_name]) ||
-        (language_limit_overrides &&
-            language_limit_overrides[limit_name]) ||
+        (language_limit_overrides && language_limit_overrides[limit_name]) ||
         config[limit_name]
     );
 }
@@ -127,21 +128,19 @@ function compute_all_limits(language_name, language_limit_overrides) {
     };
 }
 
-function get_runtime_from_flakes(runtime_name) {
-    const flake_path = `${config.flake_path}#pistonRuntimeSets.${config.runtime_set}.${runtime_name}`;
+function get_runtime_from_flakes(name, custom_flake_path = config.flake_path) {
+    const flake_path = `${custom_flake_path}#pistonRuntimeSets.${config.runtime_set}.${name}`;
     const metadata_command = `nix eval --json ${flake_path}.metadata`;
     const metadata = JSON.parse(cp.execSync(metadata_command));
 
     const this_runtime = new Runtime({
         ...metadata,
-        ...compute_all_limits(
-            metadata.language,
-            metadata.limitOverrides
-        ),
+        ...compute_all_limits(metadata.language, metadata.limitOverrides),
         flake_path,
+        name,
     });
 
-    return this_runtime
+    return this_runtime;
 }
 
 module.exports.Runtime = Runtime;

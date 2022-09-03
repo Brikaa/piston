@@ -4,6 +4,7 @@ const cp = require('child_process');
 const path = require('path');
 const config = require('./config');
 const globals = require('./globals');
+const runtime = require('./runtime');
 const fs = require('fs/promises');
 const fss = require('fs');
 const wait_pid = require('waitpid');
@@ -31,7 +32,15 @@ class Job {
     #active_timeouts;
     #active_parent_processes;
 
-    constructor({ runtime, files, args, stdin, timeouts, memory_limits }) {
+    constructor({
+        runtime,
+        files,
+        args,
+        stdin,
+        timeouts,
+        memory_limits,
+        packages,
+    }) {
         this.uuid = uuidv4();
 
         this.logger = logplease.create(`job/${this.uuid}`);
@@ -51,6 +60,8 @@ class Job {
         if (this.stdin.slice(-1) !== '\n') {
             this.stdin += '\n';
         }
+
+        this.packages = packages;
 
         this.#active_timeouts = [];
         this.#active_parent_processes = [];
@@ -109,6 +120,22 @@ class Job {
                 mode: 0o700,
             });
             await fs.chown(path.dirname(file_path), this.uid, this.gid);
+            const flake_path = path.join(config.flake_path, 'flake.nix');
+            const flake_data = (await fs.read_file(flake_path)).to_string();
+            // TODO: injection check
+            const flake_data_with_packages = flake_data
+                .replace(
+                    '# %INSERT_PACKAGES%',
+                    `packages = [ ${this.packages.join(' ')} ];`
+                )
+                .replace(
+                    './runtimes',
+                    path.join(config.flake_path, 'runtimes')
+                );
+            await fs.write_file(
+                path.join(path.dirname(file_path), 'flake.nix'),
+                flake_data_with_packages
+            );
 
             await fs.write_file(file_path, file_content);
             await fs.chown(file_path, this.uid, this.gid);
@@ -141,9 +168,18 @@ class Job {
         this.logger.debug(`Finished exit cleanup`);
     }
 
-    async safe_call(file, args, timeout, memory_limit, eventBus = null) {
+    async safe_call(
+        file,
+        args,
+        timeout,
+        memory_limit,
+        { eventBus = null, elevated_permissions = false } = {}
+    ) {
         return new Promise((resolve, reject) => {
-            const nonetwork = config.disable_networking ? ['nosocket'] : [];
+            const nonetwork =
+                config.disable_networking && !elevated_permissions
+                    ? ['nosocket']
+                    : [];
 
             const prlimit = [
                 'prlimit',
@@ -169,11 +205,17 @@ class Job {
             var stderr = '';
             var output = '';
 
+            const proc_options = elevated_permissions
+                ? {}
+                : {
+                      uid: this.uid,
+                      gid: this.gid,
+                  };
+
             const proc = cp.spawn(proc_call[0], proc_call.splice(1), {
                 stdio: 'pipe',
                 cwd: this.dir,
-                uid: this.uid,
-                gid: this.gid,
+                ...proc_options,
                 detached: true, //give this process its own process group
             });
 
@@ -241,6 +283,7 @@ class Job {
     }
 
     async execute() {
+        // TODO: group with execute interactively
         if (this.state !== job_states.PRIMED) {
             throw new Error(
                 'Job must be in primed state, current state: ' +
@@ -250,6 +293,15 @@ class Job {
 
         this.logger.info(`Executing job runtime=${this.runtime.toString()}`);
 
+        if (this.runtime.packages.length > 0) {
+            this.logger.debug('Installing the language packages');
+            this.runtime = runtime.get_runtime_from_flakes(
+                this.runtime.name,
+                this.dir
+            );
+            // TODO: handle errors
+            this.runtime.ensure_built();
+        }
         const code_files = this.files.filter(file => file.encoding == 'utf8');
 
         this.logger.debug('Compiling');
@@ -311,7 +363,7 @@ class Job {
                 code_files.map(x => x.name),
                 this.timeouts.compile,
                 this.memory_limits.compile,
-                eventBus
+                { eventBus }
             );
 
             eventBus.emit('exit', 'compile', { error, code, signal });
@@ -326,7 +378,7 @@ class Job {
                 [code_files[0].name, ...this.args],
                 this.timeouts.run,
                 this.memory_limits.run,
-                eventBus
+                { eventBus }
             );
 
             eventBus.emit('exit', 'run', { error, code, signal });

@@ -9,6 +9,7 @@
     nosocket = self.legacyPackages."${system}".nosocket;
     args = {
       inherit pkgs;
+      # %INSERT_PACKAGES%
       piston = {
         mkRuntime = {
             language,
