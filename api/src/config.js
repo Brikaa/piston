@@ -54,6 +54,12 @@ const options = {
         parser: x => x === 'true',
         validators: [x => typeof x === 'boolean' || `${x} is not a boolean`],
     },
+    disable_cgroup: {
+        desc: 'Set to true to disable using cgroup to constraint processes. The time limits and memory limits of child processes will not affect the parent process',
+        default: false,
+        parser: x => x === 'true',
+        validators: [x => typeof x === 'boolean' || `${x} is not a boolean`],
+    },
     output_max_size: {
         desc: 'Max size of each stdio buffer',
         default: 1024,

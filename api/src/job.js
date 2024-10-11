@@ -65,7 +65,9 @@ class Job {
         const metadata_file_path = `/tmp/${box_id}-metadata.txt`;
         return new Promise((res, rej) => {
             cp.exec(
-                `isolate --init --cg -b${box_id}`,
+                `isolate --init ${
+                    config.disable_cgroup ? '' : '--cg '
+                }-b${box_id}`,
                 (error, stdout, stderr) => {
                     if (error) {
                         rej(
@@ -146,13 +148,15 @@ class Job {
         let cpu_time_stat = null;
         let wall_time_stat = null;
 
+        const memory_limit_kb = Math.floor(memory_limit / 1000);
+
         const proc = cp.spawn(
             ISOLATE_PATH,
             [
                 '--run',
                 `-b${box.id}`,
                 `--meta=${box.metadata_file_path}`,
-                '--cg',
+                ...(config.disable_cgroup ? [] : ['--cg']),
                 '-s',
                 '-c',
                 '/box/submission',
@@ -166,7 +170,11 @@ class Job {
                 `--time=${cpu_time / 1000}`,
                 `--extra-time=0`,
                 ...(memory_limit >= 0
-                    ? [`--cg-mem=${Math.floor(memory_limit / 1000)}`]
+                    ? [
+                          config.disable_cgroup
+                              ? `--mem=${memory_limit_kb}`
+                              : `--cg-mem=${memory_limit_kb}`,
+                      ]
                     : []),
                 ...(config.disable_networking ? [] : ['--share-net']),
                 '--',
@@ -275,8 +283,9 @@ class Job {
                         `Failed to parse metadata file, received: ${line}`
                     );
                 }
+                const memory_key = config.disable_cgroup ? 'max-rss' : 'cg-mem';
                 switch (key) {
-                    case 'cg-mem':
+                    case memory_key:
                         memory = parse_int(value) * 1000;
                         break;
                     case 'exitcode':
@@ -420,7 +429,9 @@ class Job {
         await Promise.all(
             this.#dirty_boxes.map(async box => {
                 cp.exec(
-                    `isolate --cleanup --cg -b${box.id}`,
+                    `isolate --cleanup ${
+                        config.disable_cgroup ? '' : '--cg '
+                    }-b${box.id}`,
                     (error, stdout, stderr) => {
                         if (error) {
                             this.logger.error(
